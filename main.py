@@ -1,12 +1,12 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from tools.agent import agent
+from tools.agent import recomendar_passeios
 
 app = FastAPI(title="Climatour Agent")
 
 
 class RecomendacaoRequest(BaseModel):
-    mensagem: str  # ex: "Quero passear em Minas Gerais"
+    estado : str  # ex: "Quero passear em Minas Gerais"
 
 
 class RecomendacaoResponse(BaseModel):
@@ -16,10 +16,7 @@ class RecomendacaoResponse(BaseModel):
 @app.post("/recomendacao", response_model=RecomendacaoResponse)
 def recomendar(request: RecomendacaoRequest):
     try:
-        result = agent.invoke(
-            {"messages": [{"role": "user", "content": request.mensagem}]}
-        )
-        resposta = result["messages"][-1].content
+        resposta = recomendar_passeios(request.estado)
         return RecomendacaoResponse(recomendacao=resposta)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

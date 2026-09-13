@@ -15,7 +15,10 @@ agent = create_agent(
     ),
 )
 
-result = agent.invoke(
-    {"messages": [{"role": "user", "content": "Quero passear em Minas Gerais"}]}
-)
-print(result["messages"][-1].content)
+def recomendar_passeios(estado: str) -> str:
+    """Executa o agente para um estado brasileiro informado e retorna a recomendação."""
+    result = agent.invoke(
+        {"messages": [{"role": "user", "content": f"Quero passear em {estado}"}]}
+    )
+    return result["messages"][-1].content
+
