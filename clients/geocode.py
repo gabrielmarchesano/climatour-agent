@@ -6,7 +6,7 @@ load_dotenv()
 
 api_key = os.getenv("WEATHER_API_KEY")
 
-def get_cordinates(city_name: str, state_code: str, country_code: str, limit=1, api_key=None) -> tuple:
+def get_cordinates(city_name: str, state_code: str, country_code: str, limit=1) -> tuple:
     """
     Get geocode information for a given city, state, and country using the OpenWeatherMap API.
 
@@ -31,4 +31,3 @@ def get_cordinates(city_name: str, state_code: str, country_code: str, limit=1, 
     else:
         response.raise_for_status()
 
-print(get_cordinates("New York", "NY", "US", api_key=api_key))
