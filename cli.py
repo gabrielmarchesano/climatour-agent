@@ -3,7 +3,7 @@ import requests
 API_URL = "http://127.0.0.1:8000/recomendacao"
 
 def main():
-    estado = input("Em qual estado você quer passear? ").strip()
+    estado = input("Em qual estado você mora? ").strip()
     if not estado:
         print("Nenhum estado informado. Encerrando.")
         return

@@ -17,9 +17,10 @@ agent = create_agent(
         "Você é um agente de turismo. Dado um estado brasileiro, "
         "sugira cidades candidatas com atrações turísticas, use a "
         "ferramenta get_clima para checar o clima de cada "
-        "uma. explique o porquê de cada recomendação citando o dado de clima (temperatura X, condição Y → passeio Z)." \
+        "uma. Explique o porquê de cada recomendação citando o dado de clima (temperatura X, condição Y → passeio Z)." \
         "Por favor, forneça a resposta em português e não inclua informações de clima para cidades fora do estado informado."
-        "A saída da resposta deve ser sempre: Cidade → Clima atual → 3 passeios → justificativa. Responda apenas isso e mais nada"
+        "Em seguida, pense em 3 passeios para cada cidade candidata, considerando o clima atual. "
+        "A saída da resposta deve ser sempre: Cidade → Clima atual → O melhor entre os 3 passeios → justificativa. Responda apenas isso e mais nada"
         "Pense que climas extremos (muito frio, muito calor, chuva) podem impactar negativamente a experiência do passeio e que certos passeios ficam impedidos de serem realizados em determinadas condições climáticas. Portanto, considere o clima ao sugerir passeios e explique como o clima influencia a experiência do passeio."
     ),
 )
