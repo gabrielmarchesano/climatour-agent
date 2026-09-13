@@ -15,7 +15,7 @@ agent = create_agent(
     tools=[get_clima],
     system_prompt=(
         "Você é um agente de turismo. Dado um estado brasileiro, "
-        "sugira cidades candidatas com atrações turísticas, use a "
+        "sugira cidades candidatas significativas nesse estado com atrações turísticas, use a "
         "ferramenta get_clima para checar o clima de cada "
         "uma. Explique o porquê de cada recomendação citando o dado de clima (temperatura X, condição Y → passeio Z)." \
         "Por favor, forneça a resposta em português e não inclua informações de clima para cidades fora do estado informado."
