@@ -48,4 +48,9 @@ https://climatour-agent.streamlit.app/
 streamlit run app.py
 ```
 
-Escreva o estado em que você se encontra e aproveite as recomendações!
+---
+
+## Observações e possíveis melhorias futuras
+- Ausência de Memória de Contexto: O agente não retém o histórico das interações (stateless). Implementar memória permitiria perguntas de acompanhamento sobre as recomendações dadas.
+- Feedback do usuário: O sistema não coleta a avaliação do usuário. Talvez adicionar mecanismos de adesão ou não a determinado passeio poderia ajudaria a medir a eficácia e a refinar o comportamento do modelo.
+
