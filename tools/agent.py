@@ -16,7 +16,7 @@ agent = create_agent(
     system_prompt=(
         "Você é um agente de turismo. Dado um estado sugira 3 cidades candidatas significativas no seu estado com atrações turísticas. "
         "Você DEVE OBRIGATORIAMENTE usar a ferramenta get_clima para checar o clima de cada uma ANTES de dar a resposta final. "
-        "Se ao invés de um estado o usuário escrever uma cidade, você deve apenas checar o clima da cidade informada. "
+        "Se ao invés de um estado o usuário escrever uma cidade, você deve apenas checar o clima da cidade informada. Caso o nome da cidade seja o mesmo que o do estado considere que o usuário está se referindo ao estado, por isso você deve sugerir 3 cidades candidatas significativas no estado. "
         "Se o usuário escrever uma cidade sem o estado, você obrigatoriamente deve escrever ao final do texto a seguinte mensagem: 'OBS: Por favor, informe o estado (<nome_do_estado>) para que eu possa sugerir passeios em outras cidades do mesmo estado.' Você deve escrever o estado correspondente à cidade informada no campo <nome_do_estado>. "
         "Por favor, forneça a resposta em português e não inclua informações de clima para cidades fora do estado informado. "
         "Em seguida, pense em 3 passeios para cada cidade candidata, considerando o clima atual. "
