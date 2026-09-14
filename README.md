@@ -25,9 +25,9 @@ https://openweathermap.org/api
 ```bash
 uvicorn main:app --reload
 ```
-- Execute o CLI em um novo terminal
+- Execute o streamlit em outro terminal
 ```bash
-python cli.py
+streamlit run app.py
 ```
 
 ### O agente irá perguntar o estado em que você se encontra, basta responder e aproveitar as recomendações =)
