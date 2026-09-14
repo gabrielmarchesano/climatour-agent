@@ -35,11 +35,11 @@ https://climatour-agent.streamlit.app/
    
 ## Configuração
 - Crie um arquivo .env na raiz do projeto (use .env.example como referência) para adicionar suas chaves de acesso às API's (certifique-se de não expor elas)
+
   ```snippet
   GROQ_API_KEY="sua_chave_groq_aqui"
   OPENWEATHER_API_KEY="sua_chave_openweather_aqui"
-
-
+  <MODEL>_API_KEY = "sua_chave_qualquermodelo_aqui"
 
 ## Execução
 - Execute o streamlit no seu terminal na raiz do projeto
