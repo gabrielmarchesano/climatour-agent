@@ -52,5 +52,6 @@ streamlit run app.py
 
 ## Observações e possíveis melhorias futuras
 - Ausência de Memória de Contexto: O agente não retém o histórico das interações (stateless). Implementar memória permitiria perguntas de acompanhamento sobre as recomendações dadas.
-- Feedback do usuário: O sistema não coleta a avaliação do usuário. Talvez adicionar mecanismos de adesão ou não a determinado passeio poderia ajudaria a medir a eficácia e a refinar o comportamento do modelo.
+- Feedback do usuário: O sistema não coleta a avaliação do usuário. Talvez adicionar mecanismos para entender a adesão ou não a determinado passeio pelo usuário poderia ajudaria a medir a eficácia e a refinar o comportamento do modelo, e permitiria certo grau de personalização
+- Ausência de Sessões Individuais: A aplicação não possui sistema de autenticação, tratando os acessos de forma anônima. Criar um sistema de login daria uma sessão própria a cada usuário, permitindo salvar o histórico de recomendações de cada um.
 
