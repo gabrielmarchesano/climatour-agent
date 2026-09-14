@@ -16,6 +16,10 @@ def main():
         print("Não consegui conectar à API. Ela está rodando? (uvicorn main:app)")
     except requests.exceptions.HTTPError as e:
         print(f"Erro na API: {e}")
+        try:
+            print(f"Detalhe do erro: {resp.json().get('detail')}")
+        except ValueError:
+            pass
 
 if __name__ == "__main__":
     main()
