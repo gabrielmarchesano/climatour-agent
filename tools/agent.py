@@ -46,7 +46,15 @@ def recomendar_passeios(estado: str) -> str:
             result = agent.invoke(
                 {"messages": [{"role": "user", "content": f"Quero passear em {estado}"}]}
             )
-            return result["messages"][-1].content
+            conteudo = result["messages"][-1].content
+            
+            # Se vier como lista (com metadados/signature), extraímos apenas o texto
+            if isinstance(conteudo, list):
+                textos = [bloco["text"] for bloco in conteudo if isinstance(bloco, dict) and "text" in bloco]
+                return "".join(textos)
+            
+            # Se já vier como texto puro
+            return conteudo
             
         except Exception as e:
             erro_str = str(e).lower()
