@@ -1,7 +1,7 @@
 # Case 2: Agente ClimaTour
 Agente de IA de recomendação de passeios turísticos
 
-### Você pode testá-lo em:
+## Você pode testá-lo em:
 https://climatour-agent.streamlit.app/
 
 ---
@@ -33,7 +33,7 @@ https://climatour-agent.streamlit.app/
    ```bash
    pip install -r requirements.txt
    
-## Configuração
+### Configuração
 - Crie um arquivo .env na raiz do projeto (use .env.example como referência) para adicionar suas chaves de acesso às API's (certifique-se de não expor elas)
 
   ```snippet
@@ -41,10 +41,10 @@ https://climatour-agent.streamlit.app/
   OPENWEATHER_API_KEY="sua_chave_openweather_aqui"
   <MODEL>_API_KEY = "sua_chave_qualquermodelo_aqui"
 
-## Execução
+### Execução
 - Execute o streamlit no seu terminal na raiz do projeto
 ```bash
 streamlit run app.py
 ```
 
-### O agente irá perguntar o estado em que você se encontra, basta responder e aproveitar as recomendações!
+Escreva o estado em que você se encontra e aproveite as recomendações!
