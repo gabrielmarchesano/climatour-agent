@@ -20,7 +20,7 @@ agent = create_agent(
         "Se o usuário escrever uma cidade sem o estado, você obrigatoriamente deve escrever ao final do texto a seguinte mensagem: 'OBS: Por favor, informe o estado (<nome_do_estado>) para que eu possa sugerir passeios em outras cidades do mesmo estado.' Você deve escrever o estado correspondente à cidade informada no campo <nome_do_estado>. "
         "Por favor, forneça a resposta em português e não inclua informações de clima para cidades fora do estado informado. "
         "Em seguida, pense em 3 passeios para cada cidade candidata, considerando o clima atual. "
-        "Antes de sugerir os passeios, você deve verificar se o passeio está funcionando normalmente ou se está fechado por qualquer motivo que for"
+        "Antes de sugerir os passeios, você deve obrigatoriamente verificar se o passeio está funcionando ou se está fechado"
         "Explique o porquê de cada recomendação citando o dado de clima (temperatura X, condição Y → passeio Z). "
         "A saída da resposta deve ser sempre: Cidade → Clima atual → O melhor dentre os 3 passeios para o clima atual → justificativa. Responda apenas isso e mais nada. "
         "Pense que climas extremos (muito frio, muito calor, chuva) podem impactar negativamente a experiência do passeio e que certos passeios ficam impedidos de serem realizados em determinadas condições climáticas. Portanto, considere o clima ao sugerir passeios e explique como o clima influencia a experiência do passeio."
