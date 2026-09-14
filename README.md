@@ -1,33 +1,50 @@
 # Case 2: Agente ClimaTour
 Agente de IA de recomendação de passeios turísticos
 
-## Pré-requisitos
+### Você pode testá-lo em:
+https://climatour-agent.streamlit.app/
 
+---
+
+## Ou rodá-lo na sua própria máquina
+
+### Pré-requisitos
 - Python 3.10+
-- Chaves de API: OpenWeatherMap e Groq
+- Chaves de API gratuitas: [OpenWeatherMap](https://openweathermap.org/api) e [Groq](https://console.groq.com/keys). OBS: Você pode utilizar outro LLM que desejar, basta ter acesso à uma API_KEY
   
-## Instalação
+### Instalação
+1. Certifique-se de ter o Python instalado.
+2. Vá até a pasta raiz do projeto, e nele crie e ative um ambiente virtual:
 
-```bash
-pip install -r requirements.txt
+   ```bash
+   # Navegar até a pasta do projeto
+   git clone https://github.com/gabrielmarchesano/climatour-agent.git
+   cd climatour-agent
+   
+   # Criar o ambiente virtual
+   python -m venv .venv
 
-```
+   # Ativar no Windows:
+   .venv\Scripts\activate
+   # (Se usar Linux/Mac: source .venv/bin/activate)
+
+3. Com o ambiente virtual ativado instale as dependências
+
+   ```bash
+   pip install -r requirements.txt
+   
 ## Configuração
-- Crie um arquivo .env na raiz do projeto (use .env.example como referência)
-- Para ter acesso as API's necessárias utilize os links:
-```link
-https://console.groq.com/keys
-https://openweathermap.org/api
-```
+- Crie um arquivo .env na raiz do projeto (use .env.example como referência) para adicionar suas chaves de acesso às API's (certifique-se de não expor elas)
+  ```snippet
+  GROQ_API_KEY="sua_chave_groq_aqui"
+  OPENWEATHER_API_KEY="sua_chave_openweather_aqui"
+
+
 
 ## Execução
-- Suba a API
-```bash
-uvicorn main:app --reload
-```
-- Execute o streamlit em outro terminal
+- Execute o streamlit no seu terminal na raiz do projeto
 ```bash
 streamlit run app.py
 ```
 
-### O agente irá perguntar o estado em que você se encontra, basta responder e aproveitar as recomendações =)
+### O agente irá perguntar o estado em que você se encontra, basta responder e aproveitar as recomendações!
