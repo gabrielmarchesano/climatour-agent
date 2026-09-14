@@ -1,5 +1,6 @@
 # Case 2: Agente ClimaTour
-Agente de IA de recomendação de passeios turísticos
+Agente de IA de recomendação de passeios turísticos  
+Modelo utilizado: [openai/gpt-oss-120b](https://console.groq.com/docs/model/openai/gpt-oss-120b)
 
 ## Você pode testá-lo em:
 https://climatour-agent.streamlit.app/
