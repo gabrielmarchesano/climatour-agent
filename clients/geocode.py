@@ -30,8 +30,7 @@ def get_cordinates(city_name: str, state_code: str, country_code: str, limit=1) 
 
         if not geo_data:
             raise ValueError("No weather data found for the given coordinates")
-        return geo_data
-    
+        return geo_data[0]['lat'], geo_data[0]['lon']    
     except requests.exceptions.RequestException as e:
         if response.status_code == 401:
             raise PermissionError("OpenWeatherMap: Chave de API inválida ou sem permissão.")
