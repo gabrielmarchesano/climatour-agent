@@ -44,3 +44,42 @@ def get_weather_data(lat, lon) -> dict:
         raise RuntimeError(f"Erro de conexão ao buscar clima: {e}")
 
 
+
+
+def get_forecast_data(lat, lon) -> dict:
+    """
+    Get weather forecast data (next days, in 3-hour intervals) for a given
+    latitude and longitude using the OpenWeatherMap API (/forecast endpoint).
+
+    :param lat: Latitude
+    :param lon: Longitude
+    :return: JSON response containing forecast data
+    """
+    if not api_key:
+        raise ValueError("API key is required")
+
+    url = f"http://api.openweathermap.org/data/2.5/forecast?lat={lat}&lon={lon}&units=metric&lang=pt_br&appid={api_key}"
+
+    try:
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()  # Raise an error for bad responses
+
+        forecast_data = response.json()
+
+        if not forecast_data:
+            raise ValueError("No forecast data found for the given coordinates")
+        return forecast_data
+    except requests.exceptions.HTTPError as e:
+        if response.status_code == 401:
+            raise PermissionError("OpenWeatherMap: Chave de API inválida ou sem permissão.")
+        elif response.status_code == 404:
+            raise ValueError("OpenWeatherMap: Previsão não encontrada para estas coordenadas.")
+        elif response.status_code == 429:
+            raise ConnectionError("OpenWeatherMap: Limite de requisições excedido (Rate Limit).")
+        raise RuntimeError(f"Erro HTTP ao buscar previsão: {e}")
+
+    except requests.exceptions.Timeout:
+        raise TimeoutError("A requisição para a API de previsão expirou.")
+
+    except requests.exceptions.RequestException as e:
+        raise RuntimeError(f"Erro de conexão ao buscar previsão: {e}")
