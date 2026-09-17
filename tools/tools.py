@@ -1,6 +1,7 @@
 from langchain.tools import tool
 from clients.geocode import get_cordinates
 from clients.weather import get_weather_data, get_forecast_data
+from clients.attractions import get_attractions
 
 @tool
 def get_clima(cidade: str, uf: str, country: str) -> dict:
@@ -35,3 +36,16 @@ def get_previsao(cidade: str, uf: str, country: str) -> dict:
         for i in itens
     ]
     return {"cidade": cidade, "previsao": resumo}
+
+
+
+@tool
+def buscar_atracoes(cidade: str, uf: str, country: str) -> list:
+    """
+    Busca atrações turísticas REAIS de uma cidade (nome, categoria e, quando
+    disponível, se está aberta). Use esta ferramenta para descobrir passeios
+    reais em vez de sugerir de memória. NÃO invente atrações nem o status de
+    aberto/fechado: baseie-se no retorno desta tool.
+    """
+    lat, lon = get_cordinates(cidade, uf, country)
+    return get_attractions(lat, lon)
