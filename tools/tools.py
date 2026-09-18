@@ -42,10 +42,24 @@ def get_previsao(cidade: str, uf: str, country: str) -> dict:
 @tool
 def buscar_atracoes(cidade: str, uf: str, country: str) -> list:
     """
-    Busca atrações turísticas REAIS de uma cidade (nome, categoria e, quando
-    disponível, se está aberta). Use esta ferramenta para descobrir passeios
-    reais em vez de sugerir de memória. NÃO invente atrações nem o status de
-    aberto/fechado: baseie-se no retorno desta tool.
+    Busca atrações REAIS de uma cidade no OpenStreetMap: pontos turísticos,
+    museus, restaurantes, cafés, bares, centros históricos, igrejas, praças,
+    cachoeiras, praias, mirantes, parques e teatros.
+
+    Retorna nome, categoria, o horário publicado (`horario`) e se está aberta
+    agora (`aberto`: True, False ou None quando desconhecido). Use esta
+    ferramenta para descobrir passeios reais em vez de sugerir de memória.
+    NÃO invente atrações nem o status de aberto/fechado: baseie-se no retorno
+    desta tool. O campo `destaque` indica atrações com verbete na Wikipédia.
     """
     lat, lon = get_cordinates(cidade, uf, country)
-    return get_attractions(lat, lon)
+
+    # O horário de funcionamento precisa ser avaliado na hora LOCAL da cidade.
+    # A OpenWeatherMap devolve o deslocamento do fuso no campo "timezone".
+    # Se falhar, seguimos sem o fuso: o status vira None em vez de ficar errado.
+    try:
+        utc_offset = get_weather_data(lat, lon).get("timezone")
+    except Exception:
+        utc_offset = None
+
+    return get_attractions(lat, lon, utc_offset_seconds=utc_offset)
