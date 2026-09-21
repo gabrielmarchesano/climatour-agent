@@ -309,7 +309,10 @@ def get_attractions(
         # A query busca numa caixa quadrada (barato no servidor); aqui
         # recortamos o círculo exato do raio pedido (barato no cliente).
         coord = _coordenada(elemento)
-        if coord and _distancia_metros(centro_lat, centro_lon, *coord) > raio_max:
+        distancia = (
+            _distancia_metros(centro_lat, centro_lon, *coord) if coord else None
+        )
+        if distancia is not None and distancia > raio_max:
             continue
 
         vistos.add(nome)
@@ -326,6 +329,12 @@ def get_attractions(
             "aberto": _avaliar_opening_hours(expr_horario, agora_local),
             "horario": expr_horario,
             "destaque": destaque,
+            # Distância até o centro consultado. Permite ao agente dizer que a
+            # atração fica PRÓXIMA da cidade pedida, e não dentro dela, quando
+            # a busca precisou ser ampliada para os arredores.
+            "distancia_km": (
+                round(distancia / 1000, 1) if distancia is not None else None
+            ),
             "_pontos": _pontuar(tags, chave, destaque),
         })
 
