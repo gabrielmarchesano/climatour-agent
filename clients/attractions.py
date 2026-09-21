@@ -35,22 +35,43 @@ Causas do erro que este módulo passou a tratar, todas medidas na prática:
    falha do servidor principal virava timeout. Substituído por instâncias
    ativas e documentadas no wiki do OSM.
 
-2. Orçamento de execução menor que o custo da consulta — a causa raiz. A query
-   declarava ``[timeout:25]``, mas as 8 buscas num centro urbano denso custam
-   mais que isso. Medição em Belo Horizonte no servidor principal: HTTP 200 em
-   33,3s com ``elements`` VAZIO. A Overpass não devolve erro HTTP nesse caso;
-   devolve 200 com um campo ``remark`` dizendo que abortou a consulta. O código
-   antigo ignorava ``remark``, lia zero atrações e falhava. Agora o orçamento é
-   maior, o timeout do cliente é sempre MAIOR que o do servidor, e ``remark``
-   é detectado e tratado como falha.
+2. Orçamento de execução menor que o custo da consulta. A query declarava
+   ``[timeout:25]``, e quando a Overpass aborta ela NÃO devolve erro HTTP:
+   devolve 200 com ``elements`` vazio e um campo ``remark`` explicando. O código
+   antigo ignorava ``remark``, lia zero atrações e falhava. Hoje o orçamento é
+   maior, o timeout do cliente é sempre MAIOR que o do servidor, e ``remark`` é
+   detectado e tratado como falha.
+
+   ATENÇÃO — isto NÃO é a causa raiz, como se supôs no início. Medições
+   posteriores não encontraram um único caso de aborto por custo, nem no pior
+   cenário testado (raio de 25 km em área densa: Sé 38,9s, Rio 8,5s, BH 4,1s,
+   todos com sucesso e sem ``remark``). Ver item 5.
 
 3. Consulta caro demais por construção. ``around:`` obriga o servidor a calcular
    distância para cada candidato. Passou a usar caixa delimitadora (bbox), bem
    mais barata, com o raio exato aplicado no cliente via Haversine: mesma
    semântica de "raio em metros", muito menos trabalho no servidor.
 
-4. Sem teto de tempo nem cache. Agora há prazo total para toda a operação e
-   cache em memória por coordenada (a política do OSM pede cache e moderação).
+4. Sem teto de tempo nem cache. Hoje há prazo total para toda a operação e
+   cache em dois níveis — memória do processo e disco, em ``cache_disco.py``
+   (a política do OSM pede cache e moderação).
+
+5. A CAUSA RAIZ: sobrecarga e enfileiramento do servidor público, não custo da
+   consulta. O ``/api/status`` do servidor principal declara ``Rate limit: 2``,
+   isto é, apenas duas consultas simultâneas por IP; excedendo isso vem HTTP 429
+   ou 504. E o tempo de resposta varia enormemente pela FILA: a mesma consulta
+   em Rio das Ostras levou 1,9s, 2,6s, 33,9s e 87,4s em execuções diferentes,
+   todas bem-sucedidas e em uma única requisição HTTP.
+
+   Duas consequências de projeto, ambas aplicadas aqui:
+
+   - O timeout de leitura precisa ser GENEROSO. Um teto curto não acelera nada:
+     ele só mata consultas lentas que teriam funcionado, fazendo o usuário
+     perder atrações reais.
+   - Repetir a consulta não ajuda, porque reduzir o raio não devolve uma vaga
+     nem tira o pedido da fila. Por isso o antigo "plano B" (refazer a varredura
+     com metade do raio) foi removido: ele apenas dobrava a espera. Quem absorve
+     a lentidão é o cache, que faz uma consulta bem-sucedida valer por muitas.
 """
 
 import math
@@ -83,40 +104,53 @@ OVERPASS_ENDPOINTS = (
 # A política de uso do OSM exige identificar a aplicação.
 HEADERS = {"User-Agent": "ClimaTour-Agent/1.0 (projeto educacional)"}
 
-# Orçamento de execução pedido ao servidor, em segundos: vira ``[timeout:N]``
-# na query. O valor antigo (25s) era menor que o custo real da consulta em
-# cidades densas, o que fazia o servidor abortar e devolver lista vazia.
+# Orçamento de EXECUÇÃO pedido ao servidor, em segundos: vira ``[timeout:N]``
+# na query. Limita só o processamento, NÃO o tempo que a requisição passa na
+# fila do servidor — e a fila é a real fonte de lentidão (ver abaixo).
 #
-# Por que 50 e não mais: tempos medidos com a consulta por bbox foram 2,1s em
-# Ouro Preto, 3,3s em Copacabana e 10,3s em Belo Horizonte, ou seja, folga
-# grande para o caso normal. Só a Sé (São Paulo) não cabe em raio de 3 km, e
-# para ela o que importa é falhar rápido e cair no plano B: com orçamento de
-# 90s a resposta levava 145,7s, tempo demais para o spinner do Streamlit.
-OVERPASS_SERVER_TIMEOUT = 50
+# 40s dá folga enorme para o caso normal. Tempos de execução medidos com a
+# consulta por bbox: 1,4s em Ouro Preto, 2,5s em Belo Horizonte, 3,9s na Sé
+# (São Paulo). Mesmo o pior caso testado — raio de 25 km em área densa — ficou
+# dentro do orçamento: Sé 38,9s (241 POIs), Rio 8,5s (261), BH 4,1s (234).
+OVERPASS_SERVER_TIMEOUT = 40
 
 # Timeout de conexão curto: um espelho fora do ar falha rápido em vez de
-# pendurar a aplicação inteira (foi o que o kumi.systems fazia).
+# pendurar a aplicação inteira.
 OVERPASS_CONNECT_TIMEOUT = 8
 
-# O timeout de leitura precisa ser MAIOR que o orçamento do servidor. Se for
-# menor, o cliente desiste antes de o servidor conseguir responder — e o
-# usuário recebe "a requisição expirou" em vez do erro real.
-OVERPASS_READ_TIMEOUT = OVERPASS_SERVER_TIMEOUT + 20
+# Espera por UMA requisição no servidor principal.
+#
+# Precisa ser GENEROSA. A latência da Overpass tem cauda longa por
+# ENFILEIRAMENTO, não por custo da consulta: a mesma consulta em Rio das Ostras
+# levou 1,9s, 2,6s, 33,9s e 87,4s em execuções diferentes — todas com SUCESSO,
+# numa única requisição HTTP (verificado instrumentando as chamadas).
+#
+# Por isso um teto curto é uma armadilha: ele mata justamente as consultas
+# lentas que teriam funcionado, e o usuário perde atrações reais. 45s cobre os
+# casos lentos observados que ainda são toleráveis para um spinner; acima disso
+# a espera já é pior que degradar a resposta.
+OVERPASS_READ_TIMEOUT = 45
+
+# Espera por requisição nos espelhos de FALLBACK, que são instáveis: medido
+# 504 após 40,3s numa execução e sucesso em 10,4s noutra. Como eles só entram
+# quando o principal já falhou, interessa conseguir resposta rápida ou desistir
+# logo — não gastar mais 45s em cada um.
+OVERPASS_READ_TIMEOUT_FALLBACK = 20
 
 # Pausa antes de tentar o próximo espelho após 429/504 (o wiki do OSM pede
 # que o cliente espere ao receber esses códigos).
 PAUSA_APOS_LIMITE = 2
 
-# Teto de tempo para TODA a consulta de atrações: todos os espelhos mais o
-# plano B. Sem esse teto, o pior caso seria 3 espelhos x 70s, duas vezes
-# (consulta cheia + plano B) — minutos de spinner parado. A carga dos
-# servidores públicos varia muito: a mesma consulta em BH levou 10,3s numa
-# execução e 96,7s na seguinte, então o limite é por tempo, não por tentativas.
-OVERPASS_PRAZO_TOTAL = 150
-
-# Fração do prazo reservada à consulta no raio cheio. O resto fica para o
-# plano B, que só serve se ainda houver tempo de rodar.
-FRACAO_PRAZO_TENTATIVA_CHEIA = 0.6
+# Teto de tempo para TODA a consulta de atrações.
+#
+# Era 150s, dimensionado para "todos os espelhos MAIS o plano B". Com o plano B
+# removido, o pior caso passa a ser: principal (45s) + pausa + dois espelhos de
+# fallback (20s cada) — e este teto corta o que passar disso.
+#
+# CUIDADO ao reduzir: o prazo restante encurta o timeout de cada requisição
+# (ver ``_consultar_overpass``), então um teto baixo mata consultas lentas que
+# funcionariam. Este valor precisa ser maior que OVERPASS_READ_TIMEOUT.
+OVERPASS_PRAZO_TOTAL = 75
 
 # Cache em memória (nível 1): a mesma cidade é consultada várias vezes numa
 # conversa. O nível 2 fica em disco, em clients/cache_disco.py, e sobrevive a
@@ -299,7 +333,7 @@ def get_attractions(
         ``horario`` e ``destaque``. ``aberto`` é True, False ou None
         (desconhecido) — nunca deve ser inventado pelo agente.
     """
-    dados = _consultar_com_plano_b(lat, lon, raio)
+    dados = _consultar_com_cache(lat, lon, raio)
     agora_local = _hora_local(utc_offset_seconds)
     centro_lat, centro_lon, raio_max = float(lat), float(lon), int(raio)
 
@@ -404,7 +438,6 @@ def _montar_query(
     lon: float,
     raio: int,
     orcamento: int = OVERPASS_SERVER_TIMEOUT,
-    fator_cota: float = 1.0,
 ) -> str:
     """
     Monta a query Overpass QL cobrindo todas as categorias de atração.
@@ -421,8 +454,6 @@ def _montar_query(
 
     :param orcamento: valor de ``[timeout:N]``, o tempo que o servidor pode
         gastar antes de abortar a consulta e responder com ``remark``.
-    :param fator_cota: multiplicador das cotas por grupo. Usado no plano B,
-        quando a consulta completa não cabe no orçamento.
     """
     # Coerção numérica: evita injeção de texto arbitrário na query.
     lat_f, lon_f, raio_i = float(lat), float(lon), int(raio)
@@ -434,7 +465,7 @@ def _montar_query(
         for apelido, tipo, filtro, _ in GRUPOS_BUSCA
     )
     saidas = "\n    ".join(
-        f".{apelido} out tags center {max(5, int(cota * fator_cota))};"
+        f".{apelido} out tags center {cota};"
         for apelido, _, _, cota in GRUPOS_BUSCA
     )
 
@@ -531,7 +562,7 @@ def _consultar_overpass(query: str, prazo: float | None = None) -> dict:
 
     ultimo_erro = None
 
-    for endpoint in OVERPASS_ENDPOINTS:
+    for indice, endpoint in enumerate(OVERPASS_ENDPOINTS):
         restante = prazo - time.monotonic()
         # Sem tempo nem para abrir a conexão: para de queimar espelhos.
         if restante <= OVERPASS_CONNECT_TIMEOUT:
@@ -539,6 +570,15 @@ def _consultar_overpass(query: str, prazo: float | None = None) -> dict:
                 "Tempo esgotado ao consultar a API de atrações."
             )
             break
+
+        # O principal ganha a espera generosa, porque é o único que responde de
+        # forma confiável e sua lentidão é fila, não falha. Os fallbacks ganham
+        # teto curto: se o principal já falhou, o que importa é não somar mais
+        # dezenas de segundos em espelhos instáveis.
+        teto_leitura = (
+            OVERPASS_READ_TIMEOUT if indice == 0
+            else OVERPASS_READ_TIMEOUT_FALLBACK
+        )
 
         try:
             response = requests.post(
@@ -550,7 +590,7 @@ def _consultar_overpass(query: str, prazo: float | None = None) -> dict:
                 # nunca maior que o tempo que ainda resta.
                 timeout=(
                     OVERPASS_CONNECT_TIMEOUT,
-                    min(OVERPASS_READ_TIMEOUT, restante),
+                    min(teto_leitura, restante),
                 ),
             )
             response.raise_for_status()
@@ -604,13 +644,28 @@ def _consultar_overpass(query: str, prazo: float | None = None) -> dict:
     raise ultimo_erro or RuntimeError("Falha ao consultar a Overpass API.")
 
 
-def _consultar_com_plano_b(lat: float, lon: float, raio: int) -> dict:
+def _consultar_com_cache(lat: float, lon: float, raio: int) -> dict:
     """
-    Consulta a Overpass e, se a consulta completa não couber no orçamento do
-    servidor, tenta de novo com uma área menor.
+    Consulta a Overpass, servindo do cache quando possível.
 
-    Metade do raio é um quarto da área, o que reduz drasticamente o custo. É
-    melhor devolver menos atrações reais do que falhar a recomendação inteira.
+    Antes esta função tinha um "plano B": se a consulta falhasse, ela repetia a
+    varredura inteira com metade do raio, supondo que a falha vinha do CUSTO da
+    consulta. A medição mostrou que essa suposição estava errada:
+
+      - Nenhum caso testado foi abortado pelo servidor por custo (o campo
+        ``remark``, que sinaliza isso, nunca apareceu) — nem mesmo raio de 25 km
+        em área densa: Sé 38,9s, Rio 8,5s, BH 4,1s, todos com sucesso.
+      - As falhas reais são de SOBRECARGA do servidor público (HTTP 429/504,
+        limite de 2 consultas simultâneas por IP). Reduzir o raio não devolve
+        uma vaga nem tira o servidor da fila.
+
+    Ou seja, o plano B dobrava o tempo de espera sem atacar a causa: era ele,
+    somado aos espelhos, que fazia o teto de 150s ser alcançável. Removido, o
+    pior caso cai para o teto atual sem perder nenhuma atração — e o cache em
+    disco garante que uma consulta bem-sucedida só precisa acontecer uma vez.
+
+    Quando a consulta falha, a exceção sobe e a camada de tools converte em
+    resposta degradada, de modo que a recomendação continua saindo.
     """
     chave = (round(float(lat), 3), round(float(lon), 3), int(raio))
 
@@ -628,24 +683,10 @@ def _consultar_com_plano_b(lat: float, lon: float, raio: int) -> dict:
         _CACHE[chave] = (time.monotonic(), do_disco)
         return do_disco
 
-    inicio = time.monotonic()
-    prazo_final = inicio + OVERPASS_PRAZO_TOTAL
-    prazo_cheia = inicio + OVERPASS_PRAZO_TOTAL * FRACAO_PRAZO_TENTATIVA_CHEIA
-
-    try:
-        dados = _consultar_overpass(_montar_query(lat, lon, raio), prazo_cheia)
-    except (TimeoutError, ConnectionError) as erro_original:
-        raio_reduzido = max(1200, int(raio) // 2)
-        if raio_reduzido >= int(raio):
-            raise
-        try:
-            dados = _consultar_overpass(
-                _montar_query(lat, lon, raio_reduzido, fator_cota=0.5),
-                prazo_final,
-            )
-        except Exception:
-            # O erro da tentativa completa explica melhor o problema.
-            raise erro_original
+    # Prazo único para a operação: os espelhos são tentados dentro dele, sem
+    # segunda varredura. Falhar aqui é melhor que dobrar a espera do usuário.
+    prazo = time.monotonic() + OVERPASS_PRAZO_TOTAL
+    dados = _consultar_overpass(_montar_query(lat, lon, raio), prazo)
 
     _CACHE[chave] = (time.monotonic(), dados)
     # Guarda a resposta CRUA: o status de aberto/fechado é recalculado a cada
