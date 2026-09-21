@@ -2,6 +2,7 @@ from langchain.agents import create_agent
 from langchain.chat_models import init_chat_model
 from tools.tools import get_clima, get_previsao, buscar_atracoes
 from tools.tempo import bloco_data_atual
+from clients.erros import ErroDeApiDeDados
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -143,7 +144,8 @@ def recomendar_passeios(
 ) -> str:
     """
     Gera a próxima resposta do agente a partir do histórico completo da
-    conversa. Preserva o fallback de modelos por 429/rate limit.
+    conversa. Se o modelo da vez estourou o limite do provedor, tenta o
+    próximo da fila (ver :func:`e_limite_do_modelo`).
 
     :param historico: lista de mensagens {"role": "user"|"assistant",
                       "content": str} em ordem cronológica.
@@ -184,19 +186,98 @@ def recomendar_passeios(
             return _extrair_texto(result["messages"][-1].content)
             
         except Exception as e:
-            erro_str = str(e).lower()
-            # Se for erro 429 ou Rate Limit, ignora e tenta o próximo modelo do loop
-            if "429" in erro_str or "rate limit" in erro_str:
+            # Só o limite do PROVEDOR DE LLM justifica tentar o próximo modelo.
+            if e_limite_do_modelo(e):
                 continue
-            else:
-                # Se for outro tipo de erro (ex: API key inválida), interrompe e mostra no Streamlit
-                raise e
+            # Qualquer outra falha (chave inválida, limite de uma API de dados,
+            # erro de rede) não melhora com outro modelo: interrompe e mostra
+            # no Streamlit.
+            raise e
             
     return (
         "Nossos servidores estão superlotados no momento! Atingimos o limite "
         "de consultas gratuitas na IA. Por favor, aguarde 1 minuto e tente "
         "novamente."
     )
+
+
+# Nomes das exceções que os SDKs dos provedores usam para sinalizar limite de
+# uso. Comparamos pelo NOME da classe para não precisar importar (e instalar) o
+# SDK de cada provedor só para reconhecer o erro.
+#   - RateLimitError    -> Groq e qualquer SDK no padrão OpenAI
+#   - ResourceExhausted -> google.api_core (Gemini)
+_EXCECOES_DE_LIMITE_DO_PROVEDOR = (
+    "RateLimitError",
+    "ResourceExhausted",
+    "TooManyRequests",
+)
+
+# Atributos onde esses SDKs costumam expor o status HTTP.
+_ATRIBUTOS_DE_STATUS = ("status_code", "code", "http_status", "status")
+
+# Rede de segurança textual, usada só depois de descartar erros das APIs de
+# dados. Cobre o caso do provedor embrulhar o 429 em uma exceção genérica.
+_SINAIS_TEXTUAIS_DE_LIMITE = (
+    "429",
+    "rate limit",
+    "rate_limit",
+    "too many requests",
+    "resource_exhausted",
+    "quota",
+)
+
+
+def _cadeia_de_erros(erro: BaseException):
+    """
+    Percorre o erro e suas causas (``__cause__`` / ``__context__``).
+
+    O 429 do provedor costuma chegar embrulhado em outra exceção pela camada do
+    LangChain, então olhar só a exceção de fora perderia o sinal.
+    """
+    vistos = set()
+    atual = erro
+    while atual is not None and id(atual) not in vistos:
+        vistos.add(id(atual))
+        yield atual
+        atual = atual.__cause__ or atual.__context__
+
+
+def e_limite_do_modelo(erro: BaseException) -> bool:
+    """
+    Diz se o erro é limite de uso do PROVEDOR DE LLM — o único caso em que
+    tentar o próximo modelo da fila faz sentido.
+
+    Antes essa decisão era tomada procurando "429" ou "rate limit" no texto do
+    erro. O problema é que as APIs de dados (clima, geocodificação, atrações)
+    usam as mesmas palavras: um 429 da OpenWeatherMap fazia o agente percorrer
+    os cinco modelos em vão, já que trocar de modelo não devolve cota de uma API
+    de clima — e o usuário recebia uma mensagem dizendo que o limite era da IA.
+
+    A ordem das checagens importa:
+      1. erro marcado como vindo de uma API de dados -> NÃO é do modelo;
+      2. exceção típica de limite do provedor, por nome de classe ou status 429;
+      3. só então o texto, como rede de segurança para erros embrulhados.
+
+    :param erro: exceção capturada ao invocar o modelo.
+    :return: True se vale tentar o próximo modelo.
+    """
+    cadeia = list(_cadeia_de_erros(erro))
+
+    # 1. Origem conhecida: uma API de dados. Trocar de modelo não resolveria.
+    if any(isinstance(item, ErroDeApiDeDados) for item in cadeia):
+        return False
+
+    # 2. Assinatura explícita do provedor de LLM.
+    for item in cadeia:
+        if type(item).__name__ in _EXCECOES_DE_LIMITE_DO_PROVEDOR:
+            return True
+        for atributo in _ATRIBUTOS_DE_STATUS:
+            if getattr(item, atributo, None) == 429:
+                return True
+
+    # 3. Rede de segurança: o provedor embrulhou o 429 em erro genérico.
+    texto = " ".join(str(item).lower() for item in cadeia)
+    return any(sinal in texto for sinal in _SINAIS_TEXTUAIS_DE_LIMITE)
 
 
 def montar_system_prompt(
@@ -255,8 +336,7 @@ def esta_no_escopo(historico: list[dict]) -> bool:
             # "FORA" explícito bloqueia; qualquer outra resposta libera.
             return "FORA" not in veredito
         except Exception as e:
-            erro_str = str(e).lower()
-            if "429" in erro_str or "rate limit" in erro_str:
+            if e_limite_do_modelo(e):
                 continue
             # Classificador não pode derrubar a conversa: libera e deixa o
             # SYSTEM_PROMPT cuidar do escopo.

@@ -81,6 +81,7 @@ import requests
 from datetime import datetime, timedelta, timezone
 
 from clients import cache_disco
+from clients.erros import LimiteDeRequisicoesDeDados
 
 # Espelhos públicos da Overpass API, tentados em ordem. Todos anônimos (sem
 # chave), conferidos no wiki oficial do OSM ("Public Overpass API instances")
@@ -616,7 +617,10 @@ def _consultar_overpass(query: str, prazo: float | None = None) -> dict:
             # 429 (rate limit), 504 (sobrecarga) e 503 são comuns na Overpass:
             # vale pausar e tentar o próximo espelho.
             if status in (429, 503, 504):
-                ultimo_erro = ConnectionError(
+                # Limite/sobrecarga da API de ATRAÇÕES. O tipo marca a origem,
+                # para o fallback de modelos do agente não confundir isso com
+                # um limite do provedor de LLM.
+                ultimo_erro = LimiteDeRequisicoesDeDados(
                     "Overpass API: limite de requisições atingido ou servidor "
                     "sobrecarregado. Tente novamente em alguns instantes."
                 )

@@ -2,6 +2,8 @@ import requests
 import os
 from dotenv import load_dotenv
 
+from clients.erros import LimiteDeRequisicoesDeDados
+
 load_dotenv()
 
 api_key = os.getenv("WEATHER_API_KEY")
@@ -50,7 +52,8 @@ def get_cordinates(city_name: str, state_code: str, country_code: str, limit=1) 
                 f"OpenWeatherMap: cidade não encontrada ({local})."
             ) from e
         if status == 429:
-            raise ConnectionError(
+            # Limite da API de GEOCODIFICAÇÃO, não do provedor de LLM.
+            raise LimiteDeRequisicoesDeDados(
                 "OpenWeatherMap: Limite de requisições excedido (Rate Limit)."
             ) from e
         raise RuntimeError(f"Erro HTTP na API de geolocalização: {e}") from e
