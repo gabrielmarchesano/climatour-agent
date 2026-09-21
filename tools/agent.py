@@ -1,6 +1,7 @@
 from langchain.agents import create_agent
 from langchain.chat_models import init_chat_model
 from tools.tools import get_clima, get_previsao, buscar_atracoes
+from tools.tempo import bloco_data_atual
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -137,6 +138,8 @@ def formatar_status(aberto: bool | None) -> str:
 def recomendar_passeios(
     historico: list[dict],
     feedback: dict[int, str] | None = None,
+    fuso_nome: str | None = None,
+    fuso_offset_minutos: int | float | None = None,
 ) -> str:
     """
     Gera a próxima resposta do agente a partir do histórico completo da
@@ -145,6 +148,11 @@ def recomendar_passeios(
     :param historico: lista de mensagens {"role": "user"|"assistant",
                       "content": str} em ordem cronológica.
     :param feedback: mapa opcional {indice_da_resposta: "positivo"|"negativo"}.
+    :param fuso_nome: nome IANA do fuso do navegador do usuário (ex.:
+                      "America/Sao_Paulo"), vindo de ``st.context.timezone``.
+    :param fuso_offset_minutos: deslocamento do navegador em minutos, de
+                      ``st.context.timezone_offset``. Usado quando o nome do
+                      fuso não está disponível.
     :return: texto da resposta do agente.
     """
     # Barreira de escopo: perguntas fora de turismo/clima são recusadas antes
@@ -155,6 +163,10 @@ def recomendar_passeios(
     # Monta o contexto (histórico + sinal de feedback) enviado ao modelo
     mensagens = _montar_mensagens(historico, feedback)
 
+    # A data é resolvida a cada chamada, no fuso de quem está acessando: uma
+    # sessão longa não pode ficar presa na data em que o processo subiu.
+    system_prompt = montar_system_prompt(fuso_nome, fuso_offset_minutos)
+
     for modelo_nome in MODELOS_FALLBACK:
         try:
             # Inicializa o modelo da vez
@@ -164,7 +176,7 @@ def recomendar_passeios(
             agent = create_agent(
                 model=model,
                 tools=[get_clima, get_previsao, buscar_atracoes],
-                system_prompt=SYSTEM_PROMPT,
+                system_prompt=system_prompt,
             )
             
             # Executa a busca sobre o histórico completo da conversa
@@ -184,6 +196,27 @@ def recomendar_passeios(
         "Nossos servidores estão superlotados no momento! Atingimos o limite "
         "de consultas gratuitas na IA. Por favor, aguarde 1 minuto e tente "
         "novamente."
+    )
+
+
+def montar_system_prompt(
+    fuso_nome: str | None = None,
+    fuso_offset_minutos: int | float | None = None,
+) -> str:
+    """
+    Concatena o prompt base com o bloco de data/hora do fuso do usuário.
+
+    Precisa ser montado em tempo de chamada (e não uma vez na importação) por
+    dois motivos: o fuso só é conhecido quando a requisição chega, e a data
+    muda enquanto o processo continua no ar.
+
+    :param fuso_nome: nome IANA do fuso do navegador.
+    :param fuso_offset_minutos: deslocamento do navegador, em minutos.
+    :return: system prompt completo.
+    """
+    return (
+        f"{SYSTEM_PROMPT}\n\n"
+        f"{bloco_data_atual(fuso_nome, fuso_offset_minutos)}"
     )
 
 
