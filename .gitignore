@@ -216,3 +216,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Cache em disco das respostas da API de atrações (clients/cache_disco.py)
+.climatour_cache.sqlite3
+*.climatour_cache.sqlite3

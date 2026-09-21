@@ -59,12 +59,29 @@ def _clima_com_fuso(lat: float, lon: float) -> dict:
     return dados
 
 
+def _previsao_com_fuso(lat: float, lon: float) -> dict:
+    """
+    Busca a previsão e guarda o fuso horário que ela já traz.
+
+    A resposta do endpoint de previsão inclui ``city.timezone`` ("Shift in
+    seconds from UTC"). Antes esse campo era descartado, e ``buscar_atracoes``
+    fazia uma requisição de clima só para obter o mesmo dado. Isso pesava
+    justamente nas conversas sobre viagem FUTURA, em que o agente chama
+    get_previsao e não get_clima.
+    """
+    dados = get_forecast_data(lat, lon)
+    offset = (dados.get("city") or {}).get("timezone")
+    if offset is not None:
+        _CACHE_TIMEZONE[_chave_coord(lat, lon)] = offset
+    return dados
+
+
 def _obter_fuso(lat: float, lon: float) -> int | None:
     """
     Devolve o deslocamento do fuso da coordenada, sem repetir requisições.
 
     Ordem de preferência:
-      1. valor já guardado por uma chamada anterior de get_clima (custo zero);
+      1. valor já guardado por get_clima OU get_previsao (custo zero);
       2. uma consulta de clima, caso ainda não exista;
       3. None, se a consulta falhar — o status de funcionamento fica
          desconhecido, o que é preferível a ficar errado.
@@ -100,11 +117,35 @@ _INSTRUCAO_INDISPONIVEL = (
 )
 
 _INSTRUCAO_SEM_DADOS = (
-    "A consulta funcionou, mas não há atrações mapeadas para esta localidade. "
-    "NÃO invente nomes de atrações. Informe que não encontrou atrações "
-    "cadastradas nessa área, sugira uma cidade próxima maior e use o clima para "
-    "orientar o tipo de atividade."
+    "Não há nada mapeado nem na cidade nem nos arredores dela. NÃO invente nomes "
+    "de atrações. Informe que não encontrou atrações cadastradas na região, "
+    "sugira consultar uma cidade maior por perto e use o clima ou a previsão "
+    "para orientar o tipo de atividade."
 )
+
+# Quando a cidade pedida não tem nada mapeado, a busca é ampliada para os
+# arredores. A resposta então NÃO pode afirmar que as atrações estão na cidade:
+# ela precisa deixar claro que são sugestões próximas, no formato pedido.
+_INSTRUCAO_ARREDORES = (
+    "A cidade pedida não tem atrações mapeadas, mas as que estão em `atracoes` "
+    "ficam PRÓXIMAS dela — veja `distancia_km` em cada uma. NÃO diga que elas "
+    "estão dentro da cidade pedida e NÃO invente nada. "
+    "Comece a resposta EXATAMENTE com esta frase, trocando x, y e z pelos nomes "
+    "das atrações encontradas: "
+    "\"Não encontramos atrações nesse local, mas próximo dessa cidade tem "
+    "sugestões: x, y, z.\" "
+    "Em seguida detalhe cada sugestão normalmente, dizendo a que distância fica "
+    "e citando o clima ou a previsão para justificar a recomendação."
+)
+
+# Raios de busca, em metros, aplicados em ordem. O primeiro é a própria cidade;
+# os seguintes só entram em cena se NADA for encontrado, para nunca devolver uma
+# falha quando existe algo interessante por perto.
+#
+# Ampliar custa uma consulta extra no serviço de atrações, que tem limite por
+# IP. Mas o custo só é pago justamente nos lugares onde a consulta é barata:
+# se a cidade não tem nada mapeado, ela não é uma área densa.
+RAIOS_BUSCA = (3000, 25000)
 
 
 def _resposta_degradada(cidade: str, status: str, motivo: str, instrucao: str) -> dict:
@@ -116,6 +157,34 @@ def _resposta_degradada(cidade: str, status: str, motivo: str, instrucao: str) -
         "atracoes": [],
         "instrucao": instrucao,
     }
+
+
+def _buscar_com_expansao(
+    lat: float, lon: float, utc_offset: int | None
+) -> tuple[list, int, bool]:
+    """
+    Procura atrações na cidade e, se não houver nenhuma, amplia para os arredores.
+
+    Só a ausência de dados (``ValueError``) faz a busca expandir. Falhas de
+    infraestrutura (timeout, rate limit, rede) sobem para quem chamou, porque
+    ampliar o raio não resolveria — e só gastaria mais requisições.
+
+    :return: (atrações, raio usado em metros, se veio dos arredores).
+    :raise ValueError: quando nem o maior raio encontrou algo.
+    """
+    ultimo_vazio = None
+    for indice, raio in enumerate(RAIOS_BUSCA):
+        try:
+            atracoes = get_attractions(
+                lat, lon, raio=raio, utc_offset_seconds=utc_offset
+            )
+        except ValueError as e:
+            # Nada mapeado neste raio: tenta o próximo, maior.
+            ultimo_vazio = e
+            continue
+        return atracoes, raio, indice > 0
+
+    raise ultimo_vazio or ValueError("Nenhuma atração encontrada na região.")
 
 
 @tool
@@ -138,7 +207,8 @@ def get_previsao(cidade: str, uf: str, country: str) -> dict:
     fim de semana, amanhã, ou "os próximos dias".
     """
     lat, lon = _coords(cidade, uf, country)
-    previsao = get_forecast_data(lat, lon)
+    # Guarda o fuso que vem na própria resposta, para buscar_atracoes reusar.
+    previsao = _previsao_com_fuso(lat, lon)
     # Compacta para não estourar o contexto do modelo: janelas de 3h nas próximas ~24h
     itens = previsao.get("list", [])[:8]
     resumo = [
@@ -159,18 +229,23 @@ def buscar_atracoes(cidade: str, uf: str, country: str) -> dict:
     museus, restaurantes, cafés, bares, centros históricos, igrejas, praças,
     cachoeiras, praias, mirantes, parques e teatros.
 
-    Retorna um objeto com o campo `status`:
-      - "ok": `atracoes` traz a lista encontrada. Cada item tem `nome`,
-        `categoria`, o horário publicado (`horario`), se está aberta agora
-        (`aberto`: True, False ou None quando desconhecido) e `destaque`
-        (atração com verbete na Wikipédia).
-      - "indisponivel": o serviço de atrações falhou (rate limit, timeout).
-      - "sem_dados": a consulta funcionou, mas nada há mapeado na área.
+    Se a cidade pedida não tiver nada mapeado, a busca é ampliada
+    automaticamente para os arredores em vez de falhar.
 
-    Quando `status` não for "ok", a lista `atracoes` vem vazia e o campo
-    `instrucao` diz como responder: siga-o e NUNCA invente atrações nem o
-    status de aberto/fechado. Use esta ferramenta para descobrir passeios reais
-    em vez de sugerir de memória.
+    Retorna um objeto com o campo `status`:
+      - "ok": `atracoes` traz a lista encontrada NA cidade.
+      - "ok_arredores": a cidade não tem atrações mapeadas, e `atracoes` traz
+        opções PRÓXIMAS a ela. Não afirme que ficam na cidade pedida.
+      - "sem_dados": nada encontrado nem na cidade nem nos arredores.
+      - "indisponivel": o serviço de atrações falhou (rate limit, timeout).
+
+    Cada atração tem `nome`, `categoria`, o horário publicado (`horario`), se
+    está aberta agora (`aberto`: True, False ou None quando desconhecido),
+    `destaque` (verbete na Wikipédia) e `distancia_km` até a cidade consultada.
+
+    O campo `instrucao` diz como responder em cada caso: siga-o e NUNCA invente
+    atrações nem o status de aberto/fechado. Use esta ferramenta para descobrir
+    passeios reais em vez de sugerir de memória.
     """
     try:
         lat, lon = _coords(cidade, uf, country)
@@ -188,9 +263,11 @@ def buscar_atracoes(cidade: str, uf: str, country: str) -> dict:
     utc_offset = _obter_fuso(lat, lon)
 
     try:
-        atracoes = get_attractions(lat, lon, utc_offset_seconds=utc_offset)
+        atracoes, raio_usado, dos_arredores = _buscar_com_expansao(
+            lat, lon, utc_offset
+        )
     except ValueError as e:
-        # Ausência real de dados no OpenStreetMap: não é falha de infraestrutura.
+        # Ausência real de dados no OpenStreetMap, mesmo no raio ampliado.
         return _resposta_degradada(
             cidade, "sem_dados", str(e), _INSTRUCAO_SEM_DADOS
         )
@@ -200,5 +277,16 @@ def buscar_atracoes(cidade: str, uf: str, country: str) -> dict:
             cidade, "indisponivel", f"{type(e).__name__}: {e}",
             _INSTRUCAO_INDISPONIVEL,
         )
+
+    if dos_arredores:
+        # A cidade em si não tinha nada: as atrações são da vizinhança, e a
+        # resposta precisa deixar isso explícito.
+        return {
+            "status": "ok_arredores",
+            "cidade": cidade,
+            "raio_km": round(raio_usado / 1000),
+            "atracoes": atracoes,
+            "instrucao": _INSTRUCAO_ARREDORES,
+        }
 
     return {"status": "ok", "cidade": cidade, "atracoes": atracoes}
