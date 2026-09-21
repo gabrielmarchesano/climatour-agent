@@ -59,6 +59,8 @@ import time
 import requests
 from datetime import datetime, timedelta, timezone
 
+from clients import cache_disco
+
 # Espelhos públicos da Overpass API, tentados em ordem. Todos anônimos (sem
 # chave), conferidos no wiki oficial do OSM ("Public Overpass API instances")
 # e testados deste projeto.
@@ -116,7 +118,9 @@ OVERPASS_PRAZO_TOTAL = 150
 # plano B, que só serve se ainda houver tempo de rodar.
 FRACAO_PRAZO_TENTATIVA_CHEIA = 0.6
 
-# Cache em memória: a mesma cidade é consultada várias vezes numa conversa.
+# Cache em memória (nível 1): a mesma cidade é consultada várias vezes numa
+# conversa. O nível 2 fica em disco, em clients/cache_disco.py, e sobrevive a
+# reinícios da aplicação.
 CACHE_TTL_SEGUNDOS = 600
 _CACHE: dict[tuple, tuple[float, dict]] = {}
 
@@ -609,9 +613,20 @@ def _consultar_com_plano_b(lat: float, lon: float, raio: int) -> dict:
     melhor devolver menos atrações reais do que falhar a recomendação inteira.
     """
     chave = (round(float(lat), 3), round(float(lon), 3), int(raio))
+
+    # Nível 1: memória do processo. Resposta imediata dentro da mesma sessão.
     em_cache = _CACHE.get(chave)
     if em_cache and (time.monotonic() - em_cache[0]) < CACHE_TTL_SEGUNDOS:
         return em_cache[1]
+
+    # Nível 2: disco. Sobrevive a reinícios da aplicação, então a latência de
+    # cauda longa da Overpass é paga uma vez por localidade, não por sessão.
+    chave_disco = f"overpass:{chave[0]}:{chave[1]}:{chave[2]}"
+    do_disco = cache_disco.obter(chave_disco)
+    if do_disco is not None:
+        # Promove para a memória para as próximas leituras da mesma sessão.
+        _CACHE[chave] = (time.monotonic(), do_disco)
+        return do_disco
 
     inicio = time.monotonic()
     prazo_final = inicio + OVERPASS_PRAZO_TOTAL
@@ -633,6 +648,9 @@ def _consultar_com_plano_b(lat: float, lon: float, raio: int) -> dict:
             raise erro_original
 
     _CACHE[chave] = (time.monotonic(), dados)
+    # Guarda a resposta CRUA: o status de aberto/fechado é recalculado a cada
+    # leitura, então o dado em cache não envelhece de forma enganosa.
+    cache_disco.guardar(chave_disco, dados)
     return dados
 
 

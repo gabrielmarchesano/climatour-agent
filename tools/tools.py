@@ -59,12 +59,29 @@ def _clima_com_fuso(lat: float, lon: float) -> dict:
     return dados
 
 
+def _previsao_com_fuso(lat: float, lon: float) -> dict:
+    """
+    Busca a previsão e guarda o fuso horário que ela já traz.
+
+    A resposta do endpoint de previsão inclui ``city.timezone`` ("Shift in
+    seconds from UTC"). Antes esse campo era descartado, e ``buscar_atracoes``
+    fazia uma requisição de clima só para obter o mesmo dado. Isso pesava
+    justamente nas conversas sobre viagem FUTURA, em que o agente chama
+    get_previsao e não get_clima.
+    """
+    dados = get_forecast_data(lat, lon)
+    offset = (dados.get("city") or {}).get("timezone")
+    if offset is not None:
+        _CACHE_TIMEZONE[_chave_coord(lat, lon)] = offset
+    return dados
+
+
 def _obter_fuso(lat: float, lon: float) -> int | None:
     """
     Devolve o deslocamento do fuso da coordenada, sem repetir requisições.
 
     Ordem de preferência:
-      1. valor já guardado por uma chamada anterior de get_clima (custo zero);
+      1. valor já guardado por get_clima OU get_previsao (custo zero);
       2. uma consulta de clima, caso ainda não exista;
       3. None, se a consulta falhar — o status de funcionamento fica
          desconhecido, o que é preferível a ficar errado.
@@ -190,7 +207,8 @@ def get_previsao(cidade: str, uf: str, country: str) -> dict:
     fim de semana, amanhã, ou "os próximos dias".
     """
     lat, lon = _coords(cidade, uf, country)
-    previsao = get_forecast_data(lat, lon)
+    # Guarda o fuso que vem na própria resposta, para buscar_atracoes reusar.
+    previsao = _previsao_com_fuso(lat, lon)
     # Compacta para não estourar o contexto do modelo: janelas de 3h nas próximas ~24h
     itens = previsao.get("list", [])[:8]
     resumo = [
