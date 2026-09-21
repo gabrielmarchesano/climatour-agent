@@ -2,6 +2,8 @@ import requests
 import os
 from dotenv import load_dotenv
 
+from clients.erros import LimiteDeRequisicoesDeDados
+
 load_dotenv()
 
 api_key = os.getenv("WEATHER_API_KEY")
@@ -34,7 +36,8 @@ def get_weather_data(lat, lon) -> dict:
         elif response.status_code == 404:
             raise ValueError("OpenWeatherMap: Dados climáticos não encontrados para estas coordenadas.")
         elif response.status_code == 429:
-            raise ConnectionError("OpenWeatherMap: Limite de requisições excedido (Rate Limit).")
+            # Limite da API de CLIMA: trocar de modelo de LLM não resolveria.
+            raise LimiteDeRequisicoesDeDados("OpenWeatherMap: Limite de requisições excedido (Rate Limit).")
         raise RuntimeError(f"Erro HTTP ao buscar clima: {e}")
         
     except requests.exceptions.Timeout:
@@ -75,7 +78,8 @@ def get_forecast_data(lat, lon) -> dict:
         elif response.status_code == 404:
             raise ValueError("OpenWeatherMap: Previsão não encontrada para estas coordenadas.")
         elif response.status_code == 429:
-            raise ConnectionError("OpenWeatherMap: Limite de requisições excedido (Rate Limit).")
+            # Limite da API de PREVISÃO: trocar de modelo de LLM não resolveria.
+            raise LimiteDeRequisicoesDeDados("OpenWeatherMap: Limite de requisições excedido (Rate Limit).")
         raise RuntimeError(f"Erro HTTP ao buscar previsão: {e}")
 
     except requests.exceptions.Timeout:
