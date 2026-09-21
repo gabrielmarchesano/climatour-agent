@@ -5,4 +5,10 @@ langchain-google-genai
 langchain-groq
 python-dotenv
 requests
-streamlit
+# st.context.timezone / st.context.timezone_offset (fuso do navegador) existem
+# a partir do Streamlit 1.42.
+streamlit>=1.42
+# Base de fusos IANA. Vem junto do sistema no Linux/macOS, mas não no Windows
+# nem em contêineres slim — sem ela, ZoneInfo("America/Sao_Paulo") falharia e o
+# fuso cairia no deslocamento numérico (sem regras de horário de verão).
+tzdata

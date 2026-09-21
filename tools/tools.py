@@ -1,7 +1,15 @@
 from langchain.tools import tool
+from datetime import datetime
+
 from clients.geocode import get_cordinates
 from clients.weather import get_weather_data, get_forecast_data
 from clients.attractions import get_attractions
+from tools.tempo import (
+    agora_no_fuso,
+    dia_semana_pt,
+    fuso_por_offset_segundos,
+    rotulo_offset,
+)
 
 # ---------------------------------------------------------------------------
 # Memoização por processo.
@@ -147,6 +155,12 @@ _INSTRUCAO_ARREDORES = (
 # se a cidade não tem nada mapeado, ela não é uma área densa.
 RAIOS_BUSCA = (3000, 25000)
 
+# Quantas janelas de 3h da previsão são enviadas ao modelo. 16 janelas = ~48h,
+# cobrindo "hoje" e "amanhã" por inteiro em qualquer fuso e a qualquer hora do
+# dia. Com as 8 antigas (~24h), uma pergunta sobre amanhã feita à noite recebia
+# apenas as primeiras horas do dia seguinte.
+JANELAS_PREVISAO = 16
+
 
 def _resposta_degradada(cidade: str, status: str, motivo: str, instrucao: str) -> dict:
     """Monta o retorno da tool quando não há lista de atrações para entregar."""
@@ -187,15 +201,42 @@ def _buscar_com_expansao(
     raise ultimo_vazio or ValueError("Nenhuma atração encontrada na região.")
 
 
+def _descrever_fuso_local(lat: float, lon: float) -> dict:
+    """
+    Descreve a hora local da cidade, para o modelo nunca ter que deduzi-la.
+
+    Sem isso o modelo recebia apenas horários em UTC e chamava de "hoje" o dia
+    UTC, o que erra o dia inteiro perto da meia-noite: às 22h20 em Brasília o
+    UTC já está no dia seguinte.
+
+    :return: dict com ``agora_local`` e ``fuso_utc``, ou dict vazio quando o
+        fuso da cidade é desconhecido.
+    """
+    fuso = fuso_por_offset_segundos(_obter_fuso(lat, lon))
+    if fuso is None:
+        return {}
+    agora = agora_no_fuso(fuso)
+    return {
+        "agora_local": agora.strftime("%Y-%m-%d %H:%M"),
+        "dia_semana_local": dia_semana_pt(agora),
+        "fuso_utc": rotulo_offset(agora),
+    }
+
+
 @tool
 def get_clima(cidade: str, uf: str, country: str) -> dict:
     """
     Retorna as condições climáticas atuais de uma cidade que qualquer país que seja.
     Use esta ferramenta para saber se está chovendo, a temperatura
     e o clima geral de uma cidade específica dentro de um estado.
+
+    Inclui `agora_local` e `fuso_utc`: a data e a hora NA CIDADE consultada.
+    Use esses campos para falar do momento atual, nunca horários em UTC.
     """
     lat, lon = _coords(cidade, uf, country)
     clima = _clima_com_fuso(lat, lon)
+    # Anota a hora local da cidade junto do payload bruto da API.
+    clima.update(_descrever_fuso_local(lat, lon))
     return clima
 
 
@@ -205,21 +246,66 @@ def get_previsao(cidade: str, uf: str, country: str) -> dict:
     Retorna a PREVISÃO do tempo dos próximos dias (não o clima atual) de uma cidade.
     Use quando o usuário perguntar sobre viajar/passear em uma data futura,
     fim de semana, amanhã, ou "os próximos dias".
+
+    Cada item traz `data_hora_local` (data e hora NA CIDADE, formato
+    YYYY-MM-DD HH:MM) e `dia_semana`. Use SEMPRE esses campos para casar a
+    previsão com a data que o usuário pediu — eles já estão convertidos para o
+    fuso da cidade, indicado em `fuso_utc`. A previsão cobre cerca de 5 dias;
+    se a data pedida estiver fora desse alcance, diga isso em vez de estimar.
     """
     lat, lon = _coords(cidade, uf, country)
     # Guarda o fuso que vem na própria resposta, para buscar_atracoes reusar.
     previsao = _previsao_com_fuso(lat, lon)
-    # Compacta para não estourar o contexto do modelo: janelas de 3h nas próximas ~24h
-    itens = previsao.get("list", [])[:8]
-    resumo = [
-        {
-            "data_hora": i.get("dt_txt"),
-            "temp": i.get("main", {}).get("temp"),
-            "condicao": (i.get("weather") or [{}])[0].get("description"),
+
+    # A API devolve horários em UTC (`dt` epoch e `dt_txt`). Convertemos para a
+    # hora local da cidade, que é a única que faz sentido para o usuário.
+    fuso_cidade = fuso_por_offset_segundos(
+        (previsao.get("city") or {}).get("timezone")
+    )
+
+    # Janelas de 3h cobrindo ~48h: o suficiente para responder "hoje" E
+    # "amanhã" por inteiro, que é o caso mais comum de planejamento. Antes eram
+    # 8 itens (~24h), que não cobriam o dia seguinte completo.
+    itens = previsao.get("list", [])[:JANELAS_PREVISAO]
+    resumo = []
+    for item in itens:
+        registro = {
+            "temp": item.get("main", {}).get("temp"),
+            "condicao": (item.get("weather") or [{}])[0].get("description"),
         }
-        for i in itens
-    ]
-    return {"cidade": cidade, "previsao": resumo}
+        momento = _momento_local(item, fuso_cidade)
+        if momento is not None:
+            registro["data_hora_local"] = momento.strftime("%Y-%m-%d %H:%M")
+            registro["dia_semana"] = dia_semana_pt(momento)
+        else:
+            # Fuso desconhecido: preserva o horário original, explicitamente
+            # marcado como UTC, para o modelo não o confundir com hora local.
+            registro["data_hora_utc"] = item.get("dt_txt")
+        resumo.append(registro)
+
+    resposta = {"cidade": cidade, "previsao": resumo}
+    resposta.update(_descrever_fuso_local(lat, lon))
+    return resposta
+
+
+def _momento_local(item: dict, fuso_cidade) -> datetime | None:
+    """
+    Converte uma janela da previsão para a hora local da cidade.
+
+    Usa o campo ``dt`` (epoch UTC), que é inequívoco, em vez de reinterpretar a
+    string ``dt_txt``.
+
+    :return: datetime na hora local, ou None se não for possível converter.
+    """
+    if fuso_cidade is None:
+        return None
+    epoch = item.get("dt")
+    if epoch is None:
+        return None
+    try:
+        return datetime.fromtimestamp(int(epoch), tz=fuso_cidade)
+    except (TypeError, ValueError, OSError):
+        return None
 
 
 @tool

@@ -2,6 +2,32 @@ import streamlit as st
 from tools.agent import recomendar_passeios
 
 
+def obter_fuso_do_navegador() -> tuple[str | None, int | None]:
+    """Lê o fuso horário do navegador de quem está acessando o app.
+
+    O servidor que hospeda o Streamlit normalmente roda em UTC, então usar o
+    relógio dele erraria o dia perto da meia-noite (às 22h em Brasília já é o
+    dia seguinte em UTC). ``st.context`` expõe o fuso do próprio navegador,
+    que é o que define o "hoje" do usuário.
+
+    Preferimos o nome IANA (``timezone``) porque ele carrega as regras de
+    horário de verão; o deslocamento em minutos (``timezone_offset``) serve de
+    reserva. Ambos são lidos defensivamente: são atributos relativamente
+    recentes do Streamlit (1.42+) e podem vir vazios em reruns automáticos.
+
+    :return: (nome IANA do fuso ou None, deslocamento em minutos ou None).
+    """
+    contexto = getattr(st, "context", None)
+    if contexto is None:
+        return None, None
+
+    nome = getattr(contexto, "timezone", None) or None
+    offset = getattr(contexto, "timezone_offset", None)
+    if not isinstance(offset, (int, float)):
+        offset = None
+    return nome, offset
+
+
 def init_estado() -> None:
     """Cria as chaves de sessão na primeira renderização.
 
@@ -79,9 +105,12 @@ def main() -> None:
         with st.chat_message("assistant"):
             with st.spinner("Consultando clima, previsão e atrações..."):
                 try:
+                    fuso_nome, fuso_offset = obter_fuso_do_navegador()
                     resposta = recomendar_passeios(
                         st.session_state["mensagens"],
                         st.session_state["feedback"],
+                        fuso_nome=fuso_nome,
+                        fuso_offset_minutos=fuso_offset,
                     )
                     st.markdown(resposta)
                     st.session_state["mensagens"].append(
